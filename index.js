@@ -35,24 +35,28 @@ app.get('/api/shorturl/:short', async (req, res) => {
   const short = req.params.short;
 
   try {
+    // Find the short URL in the database
     const shortUrl = await ShortUrl.findOne({ short: short });
 
     if (!shortUrl) {
-      return res.json({ error: 'Invalid URL' });
+      // Return error if no matching short URL is found
+      return res.status(404).json({ error: 'Short URL not found' });
     }
 
-    res.redirect(shortUrl.original);
+    // Redirect to the original URL
+    res.redirect(302, shortUrl.original);
   } catch (err) {
+    // Log the error and return a generic error response
     console.error('Error retrieving short URL:', err);
-    res.json({ error: 'Invalid URL' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-app.post('/api/shorturl', function(req, res) {
-  let inputUrl = req.body.url
+app.post('/api/shorturl', async (req, res) => {
+  const inputUrl = req.body.url;
 
-  if (! inputUrl) {
-    res.json({error: 'Invalid URL'})
+  if (!inputUrl) {
+    return res.json({ error: 'Invalid URL' });
   }
 
   let parsedUrl;
@@ -62,27 +66,39 @@ app.post('/api/shorturl', function(req, res) {
     return res.json({ error: 'Invalid URL' });
   }
 
-  dns.lookup(parsedUrl.host, (err, addresses, family) => {
-    if (err) {
-      res.json({error: 'Invalid URL'})
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    return res.json({ error: 'Invalid URL' });
+  }
+
+  try {
+    const existingOne = await ShortUrl.findOne({ original: inputUrl });
+
+    console.log(existingOne)
+    if (existingOne) {
+      return res.json({ original_url: inputUrl, short_url: existingOne.short });
     }
 
-    ShortUrl.countDocuments({}, (err, count) => {
-    if (err) {
-      res.json({error: 'Invalid URL'})
-    }
 
-    let shortUrl = new ShortUrl({original: parsedUrl.origin, short: count + 1})
+    // return res.json({ hello: 'world', s:inputUrl });
 
-      shortUrl.save((err, data) => {
+    await new Promise((resolve, reject) => {
+      dns.lookup(parsedUrl.host, (err, addresses, family) => {
         if (err) {
-          res.json({error: 'Invalid URL'})
+          return reject(new Error('Invalid URL'));
         }
-
-        res.json({original_url: inputUrl, short_url: shortUrl.short})
-      })
+        resolve();
+      });
     });
-  });
+
+    const count = await ShortUrl.countDocuments({});
+    const shortUrl = new ShortUrl({ original: inputUrl, short: count + 1 });
+
+    const data = await shortUrl.save();
+
+    res.json({ original_url: inputUrl, short_url: shortUrl.short });
+  } catch (error) {
+    res.json({ error: error.message });
+  }
 });
 
 app.listen(port, function() {
